@@ -1,0 +1,42 @@
+<script setup lang="ts">
+import { onLaunch, onShow, onHide } from "@dcloudio/uni-app";
+import { useAppStore } from '@/store/index'
+import { conversationListApi, getQuickQuestionApi } from "./api/request";
+const appStore = useAppStore()
+
+onLaunch(async () => {
+  console.log("App Launch");
+  // 获取胶囊按钮坐标
+  const buttonPosition = uni.getStorageSync('buttonPosition')
+  if (!buttonPosition) {
+    const res = uni.getMenuButtonBoundingClientRect()
+    // 存储本地缓存
+    uni.setStorageSync('buttonPosition', res)
+  }
+  // 获取对话列表数据
+  const res = await conversationListApi()
+  appStore.conversationList = res.data
+  if (appStore.selectedThreadId != '') {
+    appStore.getContent(appStore.selectedThreadId)
+  } else {
+    appStore.cardSkeleton = true
+    const res = await getQuickQuestionApi()
+    appStore.CardDataList = res.data
+    appStore.cardSkeleton = false
+  }
+  if (appStore.userInfo?.access_token) {
+    appStore.connectWebSocket()
+  }
+
+});
+onShow(() => {
+  console.log("App Show");
+});
+onHide(() => {
+  console.log("App Hide");
+});
+</script>
+<style lang="scss">
+/* 注意要写在第一行，同时给style标签加入lang="scss"属性 */
+@import "uview-plus/index.scss";
+</style>

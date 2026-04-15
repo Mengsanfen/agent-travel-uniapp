@@ -21,6 +21,78 @@ load_dotenv()
 
 DB_URI = os.getenv('DB_URI')
 
+
+def _sample_route_points(points: list[Any], max_points: int = 800) -> list[Any]:
+    if len(points) <= max_points:
+        return points
+    if max_points < 2:
+        return points[:1]
+    sampled = [points[0]]
+    span = len(points) - 1
+    for i in range(1, max_points - 1):
+        idx = round(i * span / (max_points - 1))
+        sampled.append(points[idx])
+    sampled.append(points[-1])
+    return sampled
+
+
+def _normalize_route_marker(marker: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(marker, dict):
+        return None
+    latitude = marker.get("latitude", marker.get("lat"))
+    longitude = marker.get("longitude", marker.get("lon"))
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+    except (TypeError, ValueError):
+        return None
+    return {
+        "id": marker.get("id", index + 1),
+        "latitude": latitude,
+        "longitude": longitude,
+        "content": str(
+            marker.get("content")
+            or marker.get("name")
+            or marker.get("title")
+            or f"Point {index + 1}"
+        ),
+    }
+
+
+def _compact_route_payload(payload: Any) -> Any:
+    parsed = payload
+    if isinstance(payload, str):
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            return payload
+
+    if not isinstance(parsed, dict):
+        return payload
+
+    route_type = parsed.get("type")
+    if route_type not in {"route_polyline", "route_error"}:
+        return parsed
+
+    compacted = dict(parsed)
+    compacted["marker"] = [
+        marker
+        for index, item in enumerate(compacted.get("marker") or [])
+        if (marker := _normalize_route_marker(item, index)) is not None
+    ]
+
+    if route_type == "route_polyline":
+        compacted["points"] = _sample_route_points(compacted.get("points") or [])
+
+    return compacted
+
+
+def _tool_payload_for_client(message: ToolMessage) -> Any:
+    payload = getattr(message, "artifact", None)
+    if payload is None:
+        payload = message.content
+    return _compact_route_payload(payload)
+
 # 和模型对话
 """
 thread_id: 对话id
@@ -72,7 +144,7 @@ async def main_model(thread_id: str, openid: str, content: str, session: Session
 
             # 匹配工具调用结果
             elif isinstance(chunk, ToolMessage):
-                yield {"role": "tool_result", "content": {chunk.name: chunk.content}}
+                yield {"role": "tool_result", "content": {chunk.name: _tool_payload_for_client(chunk)}}
 
             # 模型回复
             elif isinstance(chunk, AIMessageChunk) and chunk.content:
@@ -202,7 +274,7 @@ async def conversation_detail(thread_id: str, tool_info: ToolInfo):
                         formatted.append({"role": "tool", "content": tool_name})
             # 获取工具结果
             elif isinstance(item, ToolMessage):
-                formatted.append({"role": "tool_result", "content": {item.name: item.content}})
+                formatted.append({"role": "tool_result", "content": {item.name: _tool_payload_for_client(item)}})
         return formatted
 
 

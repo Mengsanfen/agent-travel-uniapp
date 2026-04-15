@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import time
 from typing import Any
 
 import requests
@@ -87,15 +88,127 @@ def map_data(
             ensure_ascii=False,
         )
 
+    def request_json_with_retry(url: str, params: dict[str, Any], retries: int = 3):
+        last_error: Exception | None = None
+        for attempt in range(retries):
+            try:
+                response = requests.get(url, params=params, timeout=15)
+                response.raise_for_status()
+                payload = response.json()
+                if (
+                    isinstance(payload, dict)
+                    and str(payload.get("info", "")).upper() == "CUQPS_HAS_EXCEEDED_THE_LIMIT"
+                    and attempt < retries - 1
+                ):
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                return payload
+            except (requests.RequestException, ValueError) as err:
+                last_error = err
+                if attempt < retries - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+        raise last_error or RuntimeError("Unknown request error")
+
+    def simplify_points(points: list[dict[str, float]], max_points: int = 800) -> list[dict[str, float]]:
+        if len(points) <= max_points:
+            return points
+        if max_points < 2:
+            return points[:1]
+        sampled = [points[0]]
+        span = len(points) - 1
+        for i in range(1, max_points - 1):
+            idx = round(i * span / (max_points - 1))
+            sampled.append(points[idx])
+        sampled.append(points[-1])
+        return sampled
+
+    def normalize_marker(marker: Any, index: int) -> dict[str, Any]:
+        if not isinstance(marker, dict):
+            return {
+                "id": index + 1,
+                "latitude": 0.0,
+                "longitude": 0.0,
+                "content": str(marker),
+            }
+
+        latitude = marker.get("latitude", marker.get("lat"))
+        longitude = marker.get("longitude", marker.get("lon"))
+        content = (
+            marker.get("content")
+            or marker.get("name")
+            or marker.get("title")
+            or marker.get("city")
+            or f"Point {index + 1}"
+        )
+        marker_id = marker.get("id", index + 1)
+
+        try:
+            if latitude is None or longitude is None:
+                geocoded = geocode_to_amap_location(str(content))
+                lng, lat = geocoded.split(",")
+                longitude = float(lng)
+                latitude = float(lat)
+            else:
+                latitude = float(latitude)
+                longitude = float(longitude)
+        except Exception:
+            latitude = 0.0
+            longitude = 0.0
+
+        return {
+            "id": int(marker_id) if str(marker_id).isdigit() else index + 1,
+            "latitude": latitude,
+            "longitude": longitude,
+            "content": str(content),
+        }
+
     if not AMAP_WEB_SERVICE_KEY:
         return build_route_error("AMAP_WEB_SERVICE_KEY is not configured")
 
+    def geocode_to_amap_location(location: str) -> str:
+        geo_url = "https://restapi.amap.com/v3/geocode/geo"
+        try:
+            geo_data = request_json_with_retry(
+                geo_url,
+                {
+                    "key": AMAP_WEB_SERVICE_KEY,
+                    "address": location,
+                },
+            )
+        except requests.RequestException as err:
+            raise ValueError(f"Failed to geocode location: {location}, error: {err}") from err
+        except ValueError as err:
+            raise ValueError(f"Failed to parse geocode response for location: {location}") from err
+
+        if not isinstance(geo_data, dict):
+            raise ValueError(f"Invalid geocode response for location: {location}")
+
+        if geo_data.get("status") not in ("1", 1):
+            raise ValueError(
+                geo_data.get("info")
+                or geo_data.get("message")
+                or f"Failed to geocode location: {location}"
+            )
+
+        geocodes = geo_data.get("geocodes", [])
+        if not isinstance(geocodes, list) or len(geocodes) < 1:
+            raise ValueError(f"No geocode result found for location: {location}")
+
+        result_location = geocodes[0].get("location")
+        if not result_location:
+            raise ValueError(f"Geocode result has no coordinates for location: {location}")
+        return str(result_location)
+
     def normalize_to_amap_location(location: str) -> str:
         parts = [item.strip() for item in location.split(",")]
-        if len(parts) != 2:
-            raise ValueError(f"Invalid coordinate format: {location}")
-        latitude, longitude = float(parts[0]), float(parts[1])
-        return f"{longitude},{latitude}"
+        if len(parts) == 2:
+            try:
+                latitude, longitude = float(parts[0]), float(parts[1])
+                return f"{longitude},{latitude}"
+            except ValueError:
+                pass
+        return geocode_to_amap_location(location)
 
     def normalize_waypoints(value: str | list[Any] | None) -> str | None:
         if value is None or value == "":
@@ -126,16 +239,12 @@ def map_data(
         params["waypoints"] = amap_waypoints
 
     try:
-        res = requests.get(url, params=params, timeout=15)
-        res.raise_for_status()
+        data = request_json_with_retry(url, params)
     except requests.RequestException as err:
         print("route_request_error--------")
         print(err)
         print("route_request_error--------")
         return build_route_error(f"AMap route request failed: {err}")
-
-    try:
-        data = res.json()
     except ValueError as err:
         print("route_json_error--------")
         print(err)
@@ -194,8 +303,15 @@ def map_data(
     if len(pl) < 2:
         return build_route_error("Route polyline data is incomplete", int(status) if str(status).isdigit() else None)
 
+    normalized_markers = [normalize_marker(marker, index) for index, marker in enumerate(markers or [])]
+    normalized_markers = [
+        marker for marker in normalized_markers
+        if marker["latitude"] != 0.0 or marker["longitude"] != 0.0
+    ]
+    simplified_points = simplify_points(pl)
+
     return json.dumps(
-        {"points": pl, "type": "route_polyline", "day": day, "marker": markers},
+        {"points": simplified_points, "type": "route_polyline", "day": day, "marker": normalized_markers},
         ensure_ascii=False,
     )
 # 工具类型

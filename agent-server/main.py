@@ -63,8 +63,11 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 # 存储上传图片的文件夹路径
 image_folder = os.path.join(BASE_DIR, "images")
 os.makedirs(image_folder, exist_ok=True)
+export_folder = os.path.join(BASE_DIR, "exports")
+os.makedirs(export_folder, exist_ok=True)
 # 开启静态资源访问
 app.mount("/images", StaticFiles(directory=image_folder))
+app.mount("/exports", StaticFiles(directory=export_folder))
 app.include_router(user_router)
 app.include_router(chat_router)
 if __name__ == "__main__":

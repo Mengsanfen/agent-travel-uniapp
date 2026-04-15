@@ -1,7 +1,8 @@
-import type { AIMessageType, ApiResponse, CardDataType, ConversationListType, createConversationType, LocationDataType, TencentASRRealTimeResponse, UserLoginResType, UserLoginType } from "@/types"
+import type { AIMessageType, ApiResponse, ArchivePlanParamsType, CardDataType, ConversationListType, createConversationType, ExportPlanPdfParamsType, ExportPlanPdfResType, LocationDataType, TencentASRRealTimeResponse, TravelArchiveType, UserLoginResType, UserLoginType } from "@/types"
 import { useAppStore } from '@/store/index'
 // 公共域名
 const baseUrl = 'http://127.0.0.1:8000'
+export const baseHttpUrl = baseUrl
 export const baseWsUrl = 'ws://127.0.0.1:8000'
 // 图片上传（头像）
 export const uploadImageApi = (url: string) => {
@@ -38,7 +39,7 @@ export const uploadAudioApi = (url: string) => {
 }
 
 // 公用网络请求
-const request = <T>(url: string, method: 'GET' | 'POST' | 'DELETE', data?: any): Promise<T> => {
+const request = <T>(url: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', data?: any): Promise<T> => {
     const appStore = useAppStore()
     return new Promise((resolve, reject) => {
         uni.request({
@@ -124,6 +125,7 @@ export const sendMessageApi = async (userMessage: string) => {
             loading: true,
             toolList: [],
             toolThinking: true,
+            modelSuccess: false,
         }
     )
     appStore.sendWebSocketMessage(appStore.selectedThreadId, userMessage.trim())
@@ -167,4 +169,24 @@ export const getQuickQuestionApi = (): Promise<ApiResponse<CardDataType>> => {
 // 获取腾讯云语音URL
 export const getAsrUrlApi = (): Promise<ApiResponse<string>> => {
     return request(`/chat/get_asr_ws_url`, 'GET')
+}
+
+export const exportPlanPdfApi = (params: ExportPlanPdfParamsType): Promise<ApiResponse<ExportPlanPdfResType>> => {
+    return request(`/chat/export_plan_pdf`, 'POST', params)
+}
+
+export const archivePlanApi = (params: ArchivePlanParamsType): Promise<ApiResponse<TravelArchiveType>> => {
+    return request(`/chat/archive_plan`, 'POST', params)
+}
+
+export const archiveListApi = (): Promise<ApiResponse<TravelArchiveType[]>> => {
+    return request(`/chat/archive_list`, 'GET')
+}
+
+export const updateArchiveApi = (id: number, params: { title?: string; note?: string }): Promise<ApiResponse<TravelArchiveType>> => {
+    return request(`/chat/archive_plan/${id}`, 'PUT', params)
+}
+
+export const deleteArchiveApi = (id: number): Promise<ApiResponse<{ id: number }>> => {
+    return request(`/chat/archive_plan/${id}`, 'DELETE')
 }

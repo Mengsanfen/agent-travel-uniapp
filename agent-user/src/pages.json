@@ -23,6 +23,13 @@
 			}
 		},
 		{
+			"path": "pages/archive/index",
+			"style": {
+				"navigationBarTitleText": "行程档案",
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "pages/index/index",
 			"style": {
 				"navigationBarTitleText": "uni-app"

@@ -5,9 +5,10 @@
                 :auto-height="isAutoHeight" confirm-type="next" show-confirm-bar="false"
                 placeholder-class="textarea-placeholder" cursor-spacing="20" @linechange="lineChange"
                 @confirm="sendMessage" />
-            <button plain @click.self="voice">
+            <button class="voice-btn" plain @click.self="voice">
                 <image src="/static/yuyin.png" mode="widthFix" />
             </button>
+            <button class="send-btn" plain @click="sendMessage">发送</button>
         </view>
     </view>
 </template>
@@ -75,17 +76,20 @@ onMounted(() => {
     background-color: #fff;
 
     .box {
-        height: 66rpx;
+        min-height: 72rpx;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        border: 1rpx solid;
-        border-color: rgba(80, 120, 255, 0.7) rgba(140, 80, 220, 0.7) rgba(40, 180, 220, 0.7) rgba(100, 140, 255, 0.7);
-        border-radius: 40rpx;
-        padding: 20rpx;
+        gap: 12rpx;
+        border: 1rpx solid #b7d2c0;
+        border-radius: 8rpx;
+        padding: 16rpx;
+        box-shadow: 0 -8rpx 24rpx rgba(31, 122, 91, 0.08);
 
         textarea {
             flex: 1;
+            color: #1f2f2a;
+            font-size: 28rpx;
         }
 
         button {
@@ -100,6 +104,16 @@ onMounted(() => {
                 width: 63rpx;
                 height: 63rpx;
             }
+        }
+
+        .send-btn {
+            width: 96rpx;
+            height: 60rpx;
+            line-height: 60rpx;
+            border-radius: 6rpx;
+            background: #1f7a5b;
+            color: #fff;
+            font-size: 26rpx;
         }
     }
 }

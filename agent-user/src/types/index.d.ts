@@ -4,6 +4,50 @@ export type CardDataType = {
     prompt: string
 }[]
 
+export type TripPlannerFormType = {
+    destination: string
+    startDate: string
+    days: number
+    companions: string
+    budget: string
+    transport: string
+    accommodation: string
+    preferences: string[]
+    notes: string
+}
+
+export type ExportPlanPdfResType = {
+    filename: string
+    url: string
+}
+
+export type ExportPlanPdfParamsType = {
+    title: string
+    content: string
+    maps?: MapDataType[]
+    export_type?: 'pdf' | 'image'
+}
+
+export type ArchivePlanParamsType = ExportPlanPdfParamsType & {
+    note?: string
+    source_thread_id?: string
+}
+
+export type TravelArchiveType = {
+    id: number
+    title: string
+    note: string
+    filename: string
+    file_url: string
+    export_type: 'pdf' | 'image' | string
+    source_thread_id: string
+    content_preview: string
+    route_count: number
+    marker_count: number
+    created_at: string
+    updated_at: string
+}
+
 export type EventType = {
     detail: {
         lineCount: number

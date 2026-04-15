@@ -5,6 +5,7 @@ import os
 import time
 import urllib
 import uuid
+from datetime import datetime
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
@@ -17,9 +18,11 @@ from core.response import response
 from database import get_session
 from jwt import decode_token_ws, decode_jwt
 from models.conversations_list import ConversationsList
-from schemas.chat import ConversationsDataParams, LocationDataParams
+from models.travel_archive import TravelArchive
+from schemas.chat import ConversationsDataParams, LocationDataParams, ExportPlanPdfParams, ArchivePlanParams, UpdateArchiveParams
 from services.chat import main_model, conversation_detail, location_data, delete_conversation_by_thread_id, \
     quick_question
+from services.pdf_export import create_trip_pdf
 from state_graph import ToolInfo, get_tool_list_ws, get_tool_list_http
 
 router = APIRouter(prefix="/chat", tags=["和大模型对话"])
@@ -28,6 +31,7 @@ load_dotenv()
 APPID = os.getenv("TENCENT_APPID")
 SECRET_ID = os.getenv("TENCENT_SECRET_ID")
 SECRET_KEY = os.getenv("TENCENT_SECRET_KEY")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 和模型对话（使用普通流失输出，在小程序会中断，所以使用websocket方式）
 @router.websocket('/send_message')
@@ -124,6 +128,100 @@ async def get_quick_question(session: Session = Depends(get_session), openid:str
     content:str = ','.join(content_arr)
     res = await quick_question(content)
     return response(res)
+
+
+@router.post('/export_plan_pdf')
+async def export_plan_pdf(req: ExportPlanPdfParams, openid: str = Depends(decode_jwt)):
+    filename, _ = create_trip_pdf(
+        export_dir=os.path.join(BASE_DIR, "exports"),
+        title=req.title,
+        content=req.content,
+        maps=req.maps,
+    )
+    return response({
+        "filename": filename,
+        "url": f"/exports/{filename}",
+    })
+
+
+def _archive_preview(content: str) -> str:
+    return " ".join(content.split())[:180]
+
+
+def _archive_map_stats(maps: list[dict]) -> tuple[int, int]:
+    route_count = len(maps or [])
+    marker_count = 0
+    for item in maps or []:
+        markers = item.get("markers") or item.get("marker") or []
+        if isinstance(markers, list):
+            marker_count += len(markers)
+    return route_count, marker_count
+
+
+@router.post('/archive_plan')
+async def archive_plan(req: ArchivePlanParams, session: Session = Depends(get_session), openid: str = Depends(decode_jwt)):
+    filename, _ = create_trip_pdf(
+        export_dir=os.path.join(BASE_DIR, "exports"),
+        title=req.title,
+        content=req.content,
+        maps=req.maps,
+    )
+    route_count, marker_count = _archive_map_stats(req.maps)
+    item = TravelArchive(
+        openid=openid,
+        title=req.title or "旅行规划报告",
+        note=req.note.strip(),
+        filename=filename,
+        file_url=f"/exports/{filename}",
+        export_type=req.export_type or "pdf",
+        source_thread_id=req.source_thread_id.strip(),
+        content_preview=_archive_preview(req.content),
+        route_count=route_count,
+        marker_count=marker_count,
+    )
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return response(jsonable_encoder(item))
+
+
+@router.get('/archive_list')
+async def archive_list(session: Session = Depends(get_session), openid: str = Depends(decode_jwt)):
+    statement = select(TravelArchive).where(TravelArchive.openid == openid).order_by(desc(TravelArchive.created_at))
+    res = session.exec(statement).all()  # type: ignore
+    return response(jsonable_encoder(res))
+
+
+@router.put('/archive_plan/{archive_id}')
+async def update_archive(archive_id: int, req: UpdateArchiveParams, session: Session = Depends(get_session), openid: str = Depends(decode_jwt)):
+    statement = select(TravelArchive).where(TravelArchive.id == archive_id, TravelArchive.openid == openid)
+    item = session.exec(statement).first()  # type: ignore
+    if not item:
+        return response({}, 404, "archive not found")
+    if req.title is not None:
+        item.title = req.title.strip() or item.title
+    if req.note is not None:
+        item.note = req.note.strip()
+    item.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return response(jsonable_encoder(item))
+
+
+@router.delete('/archive_plan/{archive_id}')
+async def delete_archive(archive_id: int, session: Session = Depends(get_session), openid: str = Depends(decode_jwt)):
+    statement = select(TravelArchive).where(TravelArchive.id == archive_id, TravelArchive.openid == openid)
+    item = session.exec(statement).first()  # type: ignore
+    if not item:
+        return response({}, 404, "archive not found")
+    if item.filename:
+        file_path = os.path.join(BASE_DIR, "exports", item.filename)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+    session.delete(item)
+    session.commit()
+    return response({"id": archive_id})
 
 # 腾讯云 ASR 域名常量
 ASR_PRE = "asr.cloud.tencent.com/asr/v2"

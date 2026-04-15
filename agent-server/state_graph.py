@@ -20,12 +20,14 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres.aio import AsyncPostgresStore
 from functools import partial
 from langchain.tools import tool
+from safe_tool_node import safe_tool_node
 
 load_dotenv()
 
 # 读取环境变量
 API_KEY = os.getenv("API_KEY")
 QQ_MAP_KEY = os.getenv("QQ_MAP_KEY")
+AMAP_WEB_SERVICE_KEY = os.getenv("AMAP_WEB_SERVICE_KEY")
 MODEL = os.getenv("MODEL")
 
 # 模型参数传递
@@ -54,8 +56,7 @@ tongyi_position = ChatTongyi(
 #     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 #     streaming=True
 # )
-
-# 定义地图返回数据
+# Define map route data
 @tool
 def map_data(
         from_location: str,
@@ -64,86 +65,138 @@ def map_data(
         markers: list[Any],
         waypoints: str | list[Any] | None = None,
 ):
-    """
-    【核心功能】根据旅游攻略内容调用腾讯地图获取景点经纬度位置，并返回路线规划数据。
-
-    【使用场景】
-    例如旅游攻略：第一天：上午大理古城(起点)，下午洱海(途经点).....，晚上双廊古城(终点)；
-    需为该天路线调用本工具，传入起点/终点/途经点经纬度，以及景点标记点信息。
-
-    【参数要求（必须严格遵守）】
-    1. from_location: 起点经纬度，格式为字符串，示例："25.812655,100.230119"（纬度在前，经度在后）
-    2. to_location: 终点经纬度，格式同from_location，示例："25.700801,100.170478"
-    3. day: 行程天数，字符串类型，示例："第一天"
-    4. waypoints:字符串类型，可选，途经点，经纬度，多个用分号拼接："25.911703,100.203224;25.901234,100.203999"，若无途经点，返回None
-
-    5. markers（关键！格式必须严格符合）:
-       - 类型：Python列表（list），**禁止返回JSON字符串**
-       - 列表内每个元素为字典，字典字段及类型要求：
-         {
-           "id": 数字类型（int，如12，需唯一，可使用时间戳）,
-           "latitude": 数字类型（float，如25.812655）,
-           "longitude": 数字类型（float，如100.203224）,
-           "content": 字符串类型（如"大理古城"）
-         }
-       - 正确示例：
-         [{"id":12,"latitude":25.812655,"longitude":100.203224,"content":"大理古城"}, {"id":13,"latitude":25.700801,"longitude":100.170478,"content":"洱海"}]
-       - 错误示例（禁止）：
-         '[{"id":12,"latitude":25.812655,"longitude":100.203224,"content":"大理古城"}]'（JSON字符串）
-
-    【注意事项】
-    1. 起点/终点/途经点经纬度需先调用bailian_web_search工具获取，本工具仅负责请求腾讯地图接口；
-    2. 本工具仅处理单天路线，多天规划需多次调用后整合结果；
-    3. 所有参数的字段类型、格式必须严格匹配上述要求，尤其是waypoints禁止返回列表、markers禁止返回字符串！
-    """
-    print("工具调用")
+    """Generate route polyline data for the frontend map."""
+    print("tool call -> map_data")
     print("from_location:", from_location)
     print("to_location:", to_location)
     print("day:", day)
     print("markers:", markers)
     print("waypoints:", waypoints)
     print("------------------")
-    url = "https://apis.map.qq.com/ws/direction/v1/driving/"
-    params = {
-        "from": from_location,
-        "to": to_location,
-        "key": QQ_MAP_KEY,
-    }
-    if waypoints is not None and waypoints != "":
-        if type(waypoints) != list:
-            print("waypoints进来了if:", waypoints)
-            # waypoints = [waypoints]
-            params["waypoints"] = waypoints
+
+    def build_route_error(message: str, status: int | None = None):
+        return json.dumps(
+            {
+                "points": [],
+                "type": "route_error",
+                "day": day,
+                "marker": markers or [],
+                "message": message,
+                "status": status,
+            },
+            ensure_ascii=False,
+        )
+
+    if not AMAP_WEB_SERVICE_KEY:
+        return build_route_error("AMAP_WEB_SERVICE_KEY is not configured")
+
+    def normalize_to_amap_location(location: str) -> str:
+        parts = [item.strip() for item in location.split(",")]
+        if len(parts) != 2:
+            raise ValueError(f"Invalid coordinate format: {location}")
+        latitude, longitude = float(parts[0]), float(parts[1])
+        return f"{longitude},{latitude}"
+
+    def normalize_waypoints(value: str | list[Any] | None) -> str | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, list):
+            raw_items = [str(item).strip() for item in value if str(item).strip()]
         else:
-            print("waypoints进来了else:", waypoints)
-            params["waypoints"] = ",".join(str(num) for num in waypoints)
-    res = requests.get(url, params=params)
-    data = res.json()
-    print('data--------')
+            raw_items = [item.strip() for item in str(value).split(";") if item.strip()]
+        if not raw_items:
+            return None
+        return ";".join(normalize_to_amap_location(item) for item in raw_items)
+
+    try:
+        origin = normalize_to_amap_location(from_location)
+        destination = normalize_to_amap_location(to_location)
+        amap_waypoints = normalize_waypoints(waypoints)
+    except ValueError as err:
+        return build_route_error(str(err))
+
+    url = "https://restapi.amap.com/v5/direction/driving"
+    params = {
+        "origin": origin,
+        "destination": destination,
+        "key": AMAP_WEB_SERVICE_KEY,
+        "show_fields": "polyline",
+    }
+    if amap_waypoints:
+        params["waypoints"] = amap_waypoints
+
+    try:
+        res = requests.get(url, params=params, timeout=15)
+        res.raise_for_status()
+    except requests.RequestException as err:
+        print("route_request_error--------")
+        print(err)
+        print("route_request_error--------")
+        return build_route_error(f"AMap route request failed: {err}")
+
+    try:
+        data = res.json()
+    except ValueError as err:
+        print("route_json_error--------")
+        print(err)
+        print("route_json_error--------")
+        return build_route_error("AMap route response is not valid JSON")
+
+    print("data--------")
     print(data)
-    print('data--------')
-    # 全部路线
-    routes = data.get("result").get("routes", [])
-    print('routes--------')
-    print(routes)
-    print('routes--------')
-    if not routes or len(routes) < 1:
-        return json.dumps({"points": [], "type": "route_polyline", "day": day, "marker": []})
-    # 取第一条路线路径
-    polyline = routes[0].get("polyline", [])
-    print('polyline--------')
-    print(polyline)
-    print('polyline--------')
-    # 坐标解压（返回的点串坐标，通过前向差分进行压缩）
-    kr = 1000000.0
+    print("data--------")
+
+    if not isinstance(data, dict):
+        return build_route_error("AMap route response has an invalid structure")
+
+    status = data.get("status")
+    if status not in ("1", 1):
+        return build_route_error(
+            data.get("info") or data.get("message") or "AMap route planning failed",
+            int(status) if str(status).isdigit() else None,
+        )
+
+    route = data.get("route")
+    if not isinstance(route, dict):
+        return build_route_error("AMap route response did not include route data", int(status) if str(status).isdigit() else None)
+
+    paths = route.get("paths", [])
+    print("paths--------")
+    print(paths)
+    print("paths--------")
+    if not isinstance(paths, list) or len(paths) < 1:
+        return build_route_error("No route path was returned", int(status) if str(status).isdigit() else None)
+
+    steps = paths[0].get("steps", [])
+    print("steps--------")
+    print(steps)
+    print("steps--------")
+    if not isinstance(steps, list) or len(steps) < 1:
+        return build_route_error("No route steps were returned", int(status) if str(status).isdigit() else None)
+
     pl = []
-    for item in range(2, len(polyline)):
-        polyline[item] = polyline[item - 2] + polyline[item] / kr
-    # 将解压后的坐标放入点串数组pl中
-    for item in range(0, len(polyline), 2):
-        pl.append({"latitude": polyline[item], "longitude": polyline[item + 1]})
+    seen_points = set()
+    for step in steps:
+        polyline = step.get("polyline")
+        if not polyline:
+            continue
+        for point in str(polyline).split(";"):
+            lng_lat = [item.strip() for item in point.split(",")]
+            if len(lng_lat) != 2:
+                continue
+            longitude, latitude = float(lng_lat[0]), float(lng_lat[1])
+            point_key = (latitude, longitude)
+            if point_key in seen_points:
+                continue
+            seen_points.add(point_key)
+            pl.append({"latitude": latitude, "longitude": longitude})
+
+    if len(pl) < 2:
+        return build_route_error("Route polyline data is incomplete", int(status) if str(status).isdigit() else None)
+
     return json.dumps(
-        {"points": pl, "type": "route_polyline", "day": day, "marker": markers}
+        {"points": pl, "type": "route_polyline", "day": day, "marker": markers},
+        ensure_ascii=False,
     )
 # 工具类型
 class ToolInfo(TypedDict):
@@ -213,7 +266,7 @@ def build_state_graph(checkpointer: AsyncPostgresSaver, store: AsyncPostgresStor
     agent_builder = StateGraph(MessagesState)  # type: ignore
     # Add nodes
     agent_builder.add_node("llm_call", partial(llm_call, prompt=prompt, tool_info=tool_info))  # type: ignore
-    agent_builder.add_node("tool_node", partial(tool_node, tool_info=tool_info))  # type: ignore
+    agent_builder.add_node("tool_node", partial(safe_tool_node, tool_info=tool_info))  # type: ignore
     # Add edges to connect nodes
     agent_builder.add_edge(START, "llm_call")
     agent_builder.add_edge(START, "llm_call")

@@ -1,6 +1,6 @@
 {
-    "name" : "",
-    "appid" : "",
+    "name" : "智慧出行agent",
+    "appid" : "__UNI__95782F4",
     "description" : "",
     "versionName" : "1.0.0",
     "versionCode" : "100",
@@ -50,15 +50,15 @@
     "quickapp" : {},
     /* 小程序特有相关 */
     "mp-weixin" : {
-        "appid" : "wxf1462a33f355382d",
+        "appid" : "wx002d1289077381ad",
         "setting" : {
             "urlCheck" : false
         },
         "usingComponents" : true,
         "mergeVirtualHostAttributes" : true
     },
-    "uniStatistics": {  
-        "enable": false
+    "uniStatistics" : {
+        "enable" : false
     },
     "vueVersion" : "3"
 }

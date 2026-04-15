@@ -3,8 +3,57 @@ import xingzou from '@/static/xingzou.png'
 import { defineStore } from 'pinia'
 import { conversationDetailApi, baseWsUrl } from '@/api/request'
 const baseUrl_ws = baseWsUrl
+
+type RouteErrorPayload = {
+    type: 'route_error'
+    day: string
+    marker: []
+    points: []
+    message: string
+    status?: number | null
+}
+
+type RouteToolPayload = ModelMapType | RouteErrorPayload
+
+const getToolResultPayload = (content: unknown): unknown => {
+    if (!content || typeof content !== 'object') return null
+    const payload = content as Record<string, unknown>
+    if ('map_data' in payload) return payload.map_data
+    const values = Object.values(payload)
+    return values.length > 0 ? values[0] : null
+}
+
+const parseRouteToolPayload = (payload: unknown): RouteToolPayload | null => {
+    if (!payload) return null
+    if (typeof payload === 'string') {
+        try {
+            return JSON.parse(payload) as RouteToolPayload
+        } catch {
+            return {
+                type: 'route_error',
+                day: '',
+                marker: [],
+                points: [],
+                message: payload
+            }
+        }
+    }
+    if (typeof payload === 'object') {
+        return payload as RouteToolPayload
+    }
+    return null
+}
+
+const isRoutePolylinePayload = (payload: RouteToolPayload | null): payload is ModelMapType => {
+    return Boolean(payload && payload.type === 'route_polyline')
+}
+const isRouteErrorPayload = (payload: RouteToolPayload | null): payload is RouteErrorPayload => {
+    return Boolean(payload && payload.type === 'route_error')
+}
+
 export const useAppStore = defineStore('app', {
     state: () => ({
+
         userInfo: null as UserLoginResType | null,
         conversationList: [] as ConversationListType,
         selectedThreadId: '',
@@ -94,16 +143,12 @@ export const useAppStore = defineStore('app', {
                         const objRes = JSON.parse(res.data);
                         console.log(objRes);
                         // jsonMap：大模型返回的值 {"points": pl, "type": "route_polyline", "day": day, "marker": markers}
-                        let jsonMap: ModelMapType
-                        if (typeof objRes.content.null === 'string') {
-                            jsonMap = JSON.parse(objRes.content.null);
-                        } else {
-                            jsonMap = objRes.content.null; // 已是对象，直接使用
-                        }
+                        const toolPayload = getToolResultPayload(objRes.content)
+                        const jsonMap = parseRouteToolPayload(toolPayload)
                         console.log('type1', typeof jsonMap === 'object')
                         console.log('type2', jsonMap)
-                        console.log('type3', jsonMap.type)
-                        if (jsonMap.type && jsonMap.type === "route_polyline") {
+                        console.log('type3', jsonMap?.type)
+                        if (isRoutePolylinePayload(jsonMap)) {
                             console.log('jsonMap', jsonMap)
                             const newMapItem = this.makeUpMap(jsonMap);
                             console.log('newMapItem', newMapItem)
@@ -117,6 +162,8 @@ export const useAppStore = defineStore('app', {
                                 }
                             }
                             console.log('innner_mapDataList', aiMessageObj.mapDataList)
+                        } else if (isRouteErrorPayload(jsonMap)) {
+                            console.warn('map_data failed:', (jsonMap as RouteErrorPayload).message)
                         }
                         console.log('mapDataList', aiMessageObj.mapDataList)
                     }
@@ -261,11 +308,12 @@ export const useAppStore = defineStore('app', {
         makeUpMap(jsonMap: ModelMapType) {
             // 一天的地图数据
             let oneDayMapData: MapDataType = {}
-            const points = jsonMap.points
-            const markers = jsonMap.marker
+            if (jsonMap.type !== 'route_polyline') return {}
+            const points = jsonMap.points || []
+            const markers = jsonMap.marker || []
             const day = jsonMap.day
             // 如果大模型没有返回坐标点就返回空对象
-            if (points.length <= 0 || markers.length < 0) return {}
+            if (points.length <= 0 || markers.length <= 0) return {}
             // 遍历数据中的标记点组装成地图需要的结构   `   `       
             const markersData: MarkersType = []
             const includePoints: IncludePpointsType = [];
@@ -352,14 +400,9 @@ export const useAppStore = defineStore('app', {
                 // 如果是工具返回结果
                 if (item.role === 'tool_result') {
                     console.log('触发tool_result')
-                    let jsonMap: ModelMapType
-                    if (typeof item.content.null === 'string') {
-                        jsonMap = JSON.parse(item.content.null);
-                    } else {
-                        jsonMap = item.content.null; // 已是对象，直接使用
-                    }
+                    const jsonMap = parseRouteToolPayload(getToolResultPayload(item.content))
                     // 将每一天的地图数据返回存储到mapDataList
-                    if (jsonMap.type && jsonMap.type === "route_polyline") {
+                    if (isRoutePolylinePayload(jsonMap)) {
                         console.log('jsonMap', jsonMap)
                         const newMapItem = this.makeUpMap(jsonMap);
                         console.log('newMapItem', newMapItem)

@@ -11,11 +11,14 @@ from controllers.chat import router as chat_router
 from core.middleware import global_err_middleware, validation_exception_handler
 from database import init_db
 from fastapi.staticfiles import StaticFiles
+from mcp_loader import get_available_tools
 
 # 引入mcp工具
-from state_graph import client, tongyi, map_data
+from state_graph import tongyi, map_data
 
 load_dotenv()
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 读取环境变量
 HOST = os.getenv("HOST")
@@ -28,8 +31,16 @@ async def lifespan(app: FastAPI):
     init_db()
     print('应用启动时执行')
     # 读取mcp工具
-    tools = await client.get_tools()
+    tools, failed_servers = await get_available_tools()
     tools += [map_data]
+    loaded_tool_names = sorted(tool.name for tool in tools)
+    print(f"Loaded tools ({len(loaded_tool_names)}): {loaded_tool_names}")
+    if failed_servers:
+        print("Unavailable MCP servers:")
+        for server_name, reason in failed_servers.items():
+            print(f"  - {server_name}: {reason}")
+    else:
+        print("Unavailable MCP servers: []")
     # 大模型读取工具
     llm_with_tools = tongyi.bind_tools(tools)
     # 大模型绑定的工具
@@ -50,7 +61,8 @@ app.middleware('http')(global_err_middleware)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
 # 存储上传图片的文件夹路径
-image_folder = os.path.join(os.getcwd(), 'images')
+image_folder = os.path.join(BASE_DIR, "images")
+os.makedirs(image_folder, exist_ok=True)
 # 开启静态资源访问
 app.mount("/images", StaticFiles(directory=image_folder))
 app.include_router(user_router)

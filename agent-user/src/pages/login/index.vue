@@ -1,6 +1,6 @@
 <template>
-    <image class="login-image" src="/static/login-new.jpg" mode="widthFix" />
-    <text class="login-tip">登陆开启你的AI行程</text>
+    <image class="login-image" src="/static/background.png" mode="widthFix" />
+    <text class="login-tip">登陆开启你的AI行程规划</text>
     <view class="login-view">
         <button open-type="chooseAvatar" @chooseavatar="chooseavatar">
             <image :src="userInfo.avatar ? userInfo.avatar : '/static/touxiang.png'" />

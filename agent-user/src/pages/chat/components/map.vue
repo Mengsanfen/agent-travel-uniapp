@@ -8,7 +8,8 @@
 
         <!-- 切换天数 -->
         <view class="item-day">
-            <text v-for="(item, index) in mapDataList" :class="{ 'select-day': index === selectIndex }" @click="changeDay(index)">
+            <text v-for="(item, index) in mapDataList" :key="item.mapId || item.day || index"
+                :class="{ 'select-day': index === selectIndex }" @click="changeDay(index)">
                 {{ item.day }}
             </text>
         </view>

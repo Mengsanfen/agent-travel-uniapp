@@ -51,6 +51,27 @@ const isRouteErrorPayload = (payload: RouteToolPayload | null): payload is Route
     return Boolean(payload && payload.type === 'route_error')
 }
 
+const normalizeNumber = (value: unknown): number | null => {
+    const num = Number(value)
+    return Number.isFinite(num) ? num : null
+}
+
+const sampleRoutePoints = (
+    points: { latitude: number; longitude: number }[],
+    maxPoints = 500
+) => {
+    if (points.length <= maxPoints) return points
+    if (maxPoints < 2) return points.slice(0, 1)
+    const sampled = [points[0]]
+    const span = points.length - 1
+    for (let i = 1; i < maxPoints - 1; i += 1) {
+        const idx = Math.round((i * span) / (maxPoints - 1))
+        sampled.push(points[idx])
+    }
+    sampled.push(points[points.length - 1])
+    return sampled
+}
+
 export const useAppStore = defineStore('app', {
     state: () => ({
 
@@ -309,11 +330,29 @@ export const useAppStore = defineStore('app', {
             // 一天的地图数据
             let oneDayMapData: MapDataType = {}
             if (jsonMap.type !== 'route_polyline') return {}
-            const points = jsonMap.points || []
-            const markers = jsonMap.marker || []
+            const points = (jsonMap.points || [])
+                .map(item => ({
+                    latitude: normalizeNumber(item.latitude),
+                    longitude: normalizeNumber(item.longitude)
+                }))
+                .filter((item): item is { latitude: number; longitude: number } => item.latitude !== null && item.longitude !== null)
+            const markers = (jsonMap.marker || [])
+                .map(item => {
+                    const latitude = normalizeNumber(item.latitude)
+                    const longitude = normalizeNumber(item.longitude)
+                    if (latitude === null || longitude === null) return null
+                    return {
+                        id: item.id,
+                        latitude,
+                        longitude,
+                        content: item.content
+                    }
+                })
+                .filter((item): item is { id: number; latitude: number; longitude: number; content: string } => item !== null)
             const day = jsonMap.day
             // 如果大模型没有返回坐标点就返回空对象
             if (points.length <= 0 || markers.length <= 0) return {}
+            const sampledPoints = sampleRoutePoints(points)
             // 遍历数据中的标记点组装成地图需要的结构   `   `       
             const markersData: MarkersType = []
             const includePoints: IncludePpointsType = [];
@@ -345,13 +384,13 @@ export const useAppStore = defineStore('app', {
             oneDayMapData = {
                 mapId: String(Date.now()),
                 day: day,
-                longitude: points[0].longitude,
-                latitude: points[0].latitude,
+                longitude: sampledPoints[0].longitude,
+                latitude: sampledPoints[0].latitude,
                 markers: markersData,
                 // 途经坐标点连线
                 polyline: [
                     {
-                        points: points,
+                        points: sampledPoints,
                         color: "#858FB9",
                         width: 6,
                         borderColor: "#2f693c",
@@ -512,7 +551,7 @@ export const useAppStore = defineStore('app', {
             // 存储数据
             setItem: (key: string, value: string) => uni.setStorageSync(key, value)
         },
-        pick: ['userInfo', 'conversationList', 'selectedThreadId', 'messageList']
+        pick: ['userInfo', 'conversationList', 'selectedThreadId']
     }
 }
 )

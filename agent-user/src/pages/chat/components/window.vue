@@ -10,7 +10,7 @@
                 <text>{{ item.toolThinking ? '分析思考中...' : '分析思考完毕' }}</text>
                 <!-- <ToolSteps :tool-list="item.toolList" /> -->
                 <up-steps :current="item.toolList.length - 1" direction="column" :dot="true">
-                    <up-steps-item :title="step" v-for="(step, index) in item.toolList" />
+                    <up-steps-item :title="step" v-for="(step, index) in item.toolList" :key="`${step}-${index}`" />
                 </up-steps>
             </view>
             <!-- 模型回复的消息 -->

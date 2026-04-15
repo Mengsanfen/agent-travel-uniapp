@@ -6,14 +6,18 @@ const appStore = useAppStore()
 
 onLaunch(async () => {
   console.log("App Launch");
-  // 获取胶囊按钮坐标
+  appStore.messageList = []
+  appStore.mapDataList = []
+  appStore.newSessionData = []
+  appStore.historyToolList = []
+  // 鑾峰彇鑳跺泭鎸夐挳鍧愭爣
   const buttonPosition = uni.getStorageSync('buttonPosition')
   if (!buttonPosition) {
     const res = uni.getMenuButtonBoundingClientRect()
-    // 存储本地缓存
+    // 瀛樺偍鏈湴缂撳瓨
     uni.setStorageSync('buttonPosition', res)
   }
-  // 获取对话列表数据
+  // 鑾峰彇瀵硅瘽鍒楄〃鏁版嵁
   const res = await conversationListApi()
   appStore.conversationList = res.data
   if (appStore.selectedThreadId != '') {
@@ -37,6 +41,6 @@ onHide(() => {
 });
 </script>
 <style lang="scss">
-/* 注意要写在第一行，同时给style标签加入lang="scss"属性 */
+/* 娉ㄦ剰瑕佸啓鍦ㄧ涓€琛岋紝鍚屾椂缁檚tyle鏍囩鍔犲叆lang="scss"灞炴€?*/
 @import "uview-plus/index.scss";
 </style>
